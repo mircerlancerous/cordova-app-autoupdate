@@ -23,4 +23,4 @@ If you visit that url in a web browser you'll get a JSON representation of your 
 
 Whenever the app is loaded it scans the current folder and includes all css and js files it finds into the current html document. If one of those JS files has a global object named 'app' with a method called 'initialize', that method will be called once all file including is complete.
 
-Your file and images references can all be done with relative paths, and will work as they always have.
+Your file and image references can all be done with relative paths, and will work as they always have.
