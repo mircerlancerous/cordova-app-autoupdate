@@ -14,6 +14,7 @@ limitations under the License.
 var AppManager = (function(){
 	//private area
 	var self = {
+		logging: false,
 		updateURL: "",    //enter your app's update server url here
 		autoUpdate: true,
 		
@@ -69,7 +70,9 @@ var AppManager = (function(){
 		},
 		
 		getVersion: function(){
-			//console.log("getting version:"+JSON.stringify(Object.getOwnPropertyNames(self.Directories)));
+			if(self.logging){
+				console.log("getting version:"+JSON.stringify(Object.getOwnPropertyNames(self.Directories)));
+			}
 			//if current version found
 			var success = function(fileObj){
 				//compare the versions
@@ -90,7 +93,9 @@ var AppManager = (function(){
 					FileManager.ErrorFs(e);
 					return;
 				}
-				document.getElementById("output").innerHTML += "<br/><br/>version file not found<br/><br/>";	//for testing
+				if(self.logging){
+					console.log("version file not found");
+				}
 				//check for new version - this is likely the first load of the app
 				self.updatingSuspended(
 					function(suspended){
@@ -113,7 +118,9 @@ var AppManager = (function(){
 			var serverStr = JSON.stringify(serverObj);
 			//if there is no current version
 			if(self.versionObj === null){
-				console.log("first download");
+				if(self.logging){
+					console.log("first download");
+				}
 				//file isn't found so just save our object there
 				FileManager.saveFile(
 					self.Directories.current,
@@ -132,12 +139,16 @@ var AppManager = (function(){
 			
 			if(serverStr === JSON.stringify(self.versionObj)){
 				//no changes
-				document.getElementById("output").innerHTML += "<br/><br/>no changes";	//for testing
+				if(self.logging){
+					console.log("no changes");
+				}
 				return;
 			}
 			
 			//update required
-			document.getElementById("output").innerHTML += "<br/><br/>changes needed<br/><br/>"+JSON.stringify(self.versionObj);	//for testing
+			if(self.logging){
+				console.log("changes needed\r\n"+JSON.stringify(self.versionObj));
+			}
 			//save our new version file to the newest folder
 			FileManager.saveFile(
 				self.Directories.newest,
@@ -149,7 +160,9 @@ var AppManager = (function(){
 				serverObj,
 				self.Directories.newest,
 				function(){
-					console.log("update ready");
+					if(self.logging){
+						console.log("update ready");
+					}
 					//if we want to auto-apply
 					if(self.autoUpdate){
 						AppManager.reload();
@@ -178,7 +191,9 @@ var AppManager = (function(){
 			var root = false;
 			if(typeof(callback) !== 'undefined'){
 				root = true;
-				console.log("fetching files");
+				if(self.logging){
+					console.log("fetching files");
+				}
 			}
 			self.updateStack++;
 			
@@ -203,7 +218,9 @@ var AppManager = (function(){
 								url = url.substring(pos);
 							}
 							url = self.updateURL + "&file=" + encodeURIComponent(url + name);
-							console.log("file url: "+url);
+							if(self.logging){
+								console.log("file url: "+url);
+							}
 							self.updateStack++;
 							var fileTransfer = new FileTransfer();		//filetransfer plugin - https://github.com/apache/cordova-plugin-file-transfer
 							fileTransfer.download(
@@ -279,7 +296,9 @@ var AppManager = (function(){
 							//do nothing for now
 						}
 						if(obj !== null){
-							document.getElementById("output").innerHTML += this.responseText;	//for testing
+							if(self.logging){
+								console.log(this.responseText);
+							}
 							//compare and update where needed
 							self.performUpdate(obj);
 						}
@@ -300,7 +319,9 @@ var AppManager = (function(){
 				root = true;
 				folderObj = self.Directories.current;
 				arr = self.versionObj;
-				console.log("begin html insert ("+arr.length+")");
+				if(self.logging){
+					console.log("begin html insert ("+arr.length+")");
+				}
 			}
 			
 			var urlCallback = null;
@@ -332,13 +353,17 @@ var AppManager = (function(){
 						//do nothing; file will be accessed through AppManager.getFileURL function
 					}
 					if(urlCallback !== null){
-						console.log("start html insert: "+arr[i].name);
+						if(self.logging){
+							console.log("start html insert: "+arr[i].name);
+						}
 						self.insertStack++;
 						FileManager.getFile(
 							folderObj,
 							arr[i].name,
 							function(fileObj){
-								console.log("html insert: "+fileObj.name+" - "+url);
+								if(self.logging){
+									console.log("html insert: "+fileObj.name+" - "+url);
+								}
 								var url = FileManager.urlFromFileEntry(fileObj);
 								urlCallback(url);
 								self.insertStack--;
@@ -391,7 +416,9 @@ var AppManager = (function(){
 				var newestObj = FileManager.stringFromFileEntry(
 					fileObj,
 					function(str){
-						console.log("applying update");
+						if(self.logging){
+							console.log("applying update");
+						}
 						//delete older directory
 						FileManager.deleteDirectory(
 							self.Directories.older,
@@ -518,9 +545,9 @@ var AppManager = (function(){
 		},
 		
 		reload: function(){
-      if(typeof(navigator.splashscreen) !== 'undefined'){
-			  navigator.splashscreen.show();		//hidden onDeviceReady
-      }
+			if(typeof(navigator.splashscreen) !== 'undefined'){
+				navigator.splashscreen.show();		//hidden onDeviceReady
+			}
 			//document.location = self.oldBase;
 			// Reload the current page, without using the cache
 			setTimeout(
@@ -552,3 +579,5 @@ var AppManager = (function(){
 		}
 	};
 })();
+
+AppManager.initialize();
