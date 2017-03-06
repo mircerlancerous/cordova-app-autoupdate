@@ -47,13 +47,13 @@ var FileManager = (function(){
 					break;
 			};
 			
-			console.log("filesystem error: "+msg);
+			console.log("filesystem error("+e.code+"): "+msg);
 		},
 		
 		move: function(moveObj, destObj, callback){
 			moveObj.moveTo(
 				destObj,
-				{},		//don't rename
+				moveObj.name,
 				callback,
 				FileManager.ErrorFs
 			);
@@ -62,9 +62,12 @@ var FileManager = (function(){
 		copy: function(sourceObj, destObj, callback){
 			sourceObj.copyTo(
 				destObj,
-				{},
+				sourceObj.name,
 				callback,
-				FileManager.ErrorFs
+				function(e){
+					console.log("error copying:"+FileManager.urlFromFileEntry(sourceObj)+" to "+FileManager.urlFromDirectoryEntry(destObj));
+					FileManager.ErrorFs(e);
+				}
 			);
 		},
 		
@@ -85,6 +88,9 @@ var FileManager = (function(){
 		//dir can be a string or a DirectoryEntry object
 		getDirectory: function(dir, callback, dirObj){
 			if(typeof(cordova.file.dataDirectory) === 'undefined'){
+				if(self.logging){
+					console.log("no data directory");
+				}
 				return false;
 			}
 			
@@ -99,12 +105,29 @@ var FileManager = (function(){
 				if(dir === null){
 					return dirObj;
 				}
-				dirObj.getDirectory(
-					dir,
-					{create:true},
-					callback,
-					FileManager.ErrorFs
-				);
+				if(self.logging){
+					console.log("get dir: "+dir);
+				}
+				//if dir is relative
+				if(dir.search("file:///") < 0){
+					dirObj.getDirectory(
+						dir,
+						{create:true},
+						callback,
+						function(e){
+							console.log("failed to get dir:"+dirObj.name+" - "+dir);
+							FileManager.ErrorFs(e);
+						}
+					);
+				}
+				//if dir is url
+				else{
+					window.resolveLocalFileSystemURL(
+						dir,
+						callback,
+						FileManager.ErrorFs
+					);
+				}
 			};
 			if(dirObj === null && self.rootDir === null){
 				window.resolveLocalFileSystemURL(
@@ -155,7 +178,9 @@ var FileManager = (function(){
 				error = FileManager.ErrorFs;
 			}
 			var fetch = function(dirObj){
-				console.log("fetch file: "+folderObj.name+"/"+fileName);
+				if(self.logging){
+					console.log("fetch file: "+folderObj.name+"/"+fileName);
+				}
 				dirObj.getFile(
 					fileName,
 					{create: false, exclusive: false},
@@ -213,7 +238,7 @@ var FileManager = (function(){
 			
 			        reader.onloadend = function() {
 			        	if(self.logging){
-			            	console.log("Successful file read: " + this.result);
+			            	console.log("Successful file read: " + fileObj.name);
 			        	}
 			            callback(this.result);
 			        };
@@ -226,6 +251,14 @@ var FileManager = (function(){
 		
 		//function result contains trailing slash
 		urlFromDirectoryEntry: function(folderObj,callback){
+			if(typeof(folderObj) === 'undefined' || folderObj === null){
+				if(self.rootDir !== null){
+					folderObj = self.rootDir;
+				}
+				else{
+					return false;
+				}
+			}
 			return FileManager.urlFromFileEntry(folderObj,callback);
 		},
 		
