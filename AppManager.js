@@ -11,22 +11,31 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+/*
+Plugin list:
+https://github.com/apache/cordova-plugin-file-transfer
+https://github.com/MobileChromeApps/cordova-plugin-zip		-not yet implemented
+*/
+
 var AppManager = (function(){
 	//private area
-	var self = {
-		logging: false,
-		updateURL: "",    //enter your app's update server url here
+	var config = {
 		autoUpdate: true,
-		
-		dirPrefix: "AppFiles",		//do NOT change this value as it is hard-coded throughout...oops
-		oldBase: "",
+		logging: false,
+		updateURL: "", //enter your app's update server url here
 		versionFile: "version.json",
+		dirPrefix: "AppFiles"
+	};
+	
+	var self = {
+		oldBase: "",
 		versionObj: null,
 		Directories: {},
 		
 		insertStack: 0,		//for checking whether we're still inserting HTML links before we start erasing files
 		updateStack: 0,		//for checking whether we're still downloading the update or not
 		updateReady: false,
+		downloadError: false,
 		
 		//do NOT change these values as they are hard-coded throughout
 		Folders: [
@@ -49,7 +58,7 @@ var AppManager = (function(){
 				return;
 			}
 			
-			var dir = self.dirPrefix;
+			var dir = config.dirPrefix;
 			if(length > 0){
 				dir += "/"+self.Folders[length-1];
 			}
@@ -57,7 +66,7 @@ var AppManager = (function(){
 		//		console.log("got folder: "+dir);
 				dir = dir.split("/");
 				if(dir.length == 1){
-					dir = self.dirPrefix;
+					dir = config.dirPrefix;
 				}
 				else{
 					dir = dir[1];
@@ -70,7 +79,7 @@ var AppManager = (function(){
 		},
 		
 		getVersion: function(){
-			if(self.logging){
+			if(config.logging){
 				console.log("getting version:"+JSON.stringify(Object.getOwnPropertyNames(self.Directories)));
 			}
 			//if current version found
@@ -93,7 +102,7 @@ var AppManager = (function(){
 					FileManager.ErrorFs(e);
 					return;
 				}
-				if(self.logging){
+				if(config.logging){
 					console.log("version file not found");
 				}
 				//check for new version - this is likely the first load of the app
@@ -108,7 +117,7 @@ var AppManager = (function(){
 			//fetch current file
 			FileManager.getFile(
 				self.Directories.current,
-				self.versionFile,
+				config.versionFile,
 				success,
 				error
 			);
@@ -118,13 +127,13 @@ var AppManager = (function(){
 			var serverStr = JSON.stringify(serverObj);
 			//if there is no current version
 			if(self.versionObj === null){
-				if(self.logging){
+				if(config.logging){
 					console.log("first download");
 				}
 				//file isn't found so just save our object there
 				FileManager.saveFile(
 					self.Directories.current,
-					self.versionFile,
+					config.versionFile,
 					serverStr
 				);
 				self.versionObj = serverObj;
@@ -139,32 +148,41 @@ var AppManager = (function(){
 			
 			if(serverStr === JSON.stringify(self.versionObj)){
 				//no changes
-				if(self.logging){
+				if(config.logging){
 					console.log("no changes");
 				}
 				return;
 			}
 			
 			//update required
-			if(self.logging){
-				console.log("changes needed\r\n"+JSON.stringify(self.versionObj));
+			if(config.logging){
+				console.log("changes needed");
 			}
+			
 			//save our new version file to the newest folder
 			FileManager.saveFile(
 				self.Directories.newest,
-				self.versionFile,
+				config.versionFile,
 				serverStr
 			);
+			//build update plan
+			self.buildUpdatePlan(serverObj,self.versionObj);
 			//download all files to the newest folder
 			self.fetchFiles(
 				serverObj,
 				self.Directories.newest,
 				function(){
-					if(self.logging){
+					if(self.downloadError){
+						if(config.logging){
+							console.log("download error - update aborted");
+						}
+						return;
+					}
+					if(config.logging){
 						console.log("update ready");
 					}
 					//if we want to auto-apply
-					if(self.autoUpdate){
+					if(config.autoUpdate){
 						AppManager.reload();
 					}
 					//if we want to control when the app is updated
@@ -173,6 +191,32 @@ var AppManager = (function(){
 					}
 				}
 			);
+		},
+		
+		buildUpdatePlan: function(serverObj,refObj){
+			var changed = false;
+			for(var i=0; i<serverObj.length; i++){
+				changed = false;
+				//check if reference exists
+				if(typeof(refObj[i]) === 'undefined'){
+					changed = true;
+				}
+				//if file
+				if(serverObj[i].content === null){
+					//check if reference is the same
+					if(JSON.stringify(serverObj[i].version) != JSON.stringify(refObj[i].version)){
+						changed = true;
+					}
+					serverObj[i].changed = changed;
+					if(changed && config.logging){
+						console.log("changed:"+serverObj[i].name);
+					}
+				}
+				//if folder that hasn't changed
+				else if(!changed){
+					self.buildUpdatePlan(serverObj[i].content,refObj[i].content);
+				}
+			}
 		},
 		
 		rollback: function(){
@@ -191,65 +235,135 @@ var AppManager = (function(){
 			var root = false;
 			if(typeof(callback) !== 'undefined'){
 				root = true;
-				if(self.logging){
+				self.updateStack++;
+				if(config.logging){
 					console.log("fetching files");
 				}
 			}
-			self.updateStack++;
 			
 			for(var i=0; i<arr.length; i++){
 				//if file
 				if(arr[i].content === null){
-					var fetch = (function(){
+					var download = (function(){
 						var name = arr[i].name;
 						return function(e){
 							if(e.code !== FileError.NOT_FOUND_ERR){
 								//other issue so send to file manager error handler
 								FileManager.ErrorFs(e);
+								self.updateStack--;
+								self.downloadError = true;
 								return;
 							}
+							/******************
+							self.updateStack--;
+							console.log("needed file: "+name);
+							return;
+							******************/
 							//download the file as it's missing
 							var url = FileManager.urlFromDirectoryEntry(folderObj);
-							var pos = url.indexOf(self.dirPrefix);
-							pos += self.dirPrefix.length + 1;
+							var pos = url.indexOf(config.dirPrefix);
+							pos += config.dirPrefix.length + 1;
 							url = url.substring(pos);
 							pos = url.indexOf("/");
 							if(pos > -1){
 								url = url.substring(pos);
 							}
-							url = self.updateURL + "&file=" + encodeURIComponent(url + name);
-							if(self.logging){
+							url = config.updateURL + "&file=" + encodeURIComponent(url + name);
+						/*	if(config.logging){
 								console.log("file url: "+url);
-							}
-							self.updateStack++;
-							var fileTransfer = new FileTransfer();		//filetransfer plugin - https://github.com/apache/cordova-plugin-file-transfer
+							}*/
+							var fileTransfer = new FileTransfer();
 							fileTransfer.download(
 								url,
 								FileManager.urlFromDirectoryEntry(folderObj) + name,
 								function(){
-							//		console.log("downloaded: "+name);
+									if(config.logging){
+										console.log("downloaded: "+folderObj.name+"/"+name);
+									}
 									self.updateStack--;
 								},
 								function(error) {
-									console.log("download error source " + error.source);
-									console.log("download error target " + error.target);
-									console.log("download error code" + error.code);
+									self.updateStack--;
+									self.downloadError = true;
+									//console.log(JSON.stringify(error));
+									console.log("download error: " + error.source + " " + error.target+ " " + error.code);
 								},
 								true/*,		//trust all hosts
 								[options]*/
 							);
 						};
 					})();
-					//attempt to fetch the file - if successful, do nothing, otherwise download it
-					FileManager.getFile(
-						folderObj,
-						arr[i].name,
-						function(){},
-						fetch
-					);
+					
+					self.updateStack++;
+					if(typeof(arr[i].changed) === 'undefined' || arr[i].changed){
+						//attempt to fetch the file - if successful (already downloaded), do nothing, otherwise download it
+						FileManager.getFile(
+							folderObj,
+							arr[i].name,
+							function(fileObj){
+								self.updateStack--;
+								if(config.logging){
+									console.log("already have:"+fileObj.name);
+								}
+							},
+							download
+						);
+					}
+					else{
+						//copy the file from current
+						var folderName = FileManager.urlFromDirectoryEntry(folderObj);
+						folderName = folderName.replace("/newest/","/current/");
+						var copyFile = (function(){
+							var name = arr[i].name;
+							return function(fObj){
+								FileManager.getFile(
+									fObj,
+									name,
+									function(fileObj){
+										FileManager.copy(
+											fileObj,
+											folderObj,
+											function(){
+												self.updateStack--;
+												if(config.logging){
+													console.log("copied file:"+fileObj.name);
+												}
+											}
+										);
+									},
+									function(e){
+										console.log("failed to get:"+folderName+name);
+									}
+								);
+							};
+						})();
+						var startCopy = (function(){
+							var callback = copyFile;
+							var fName = folderName;
+							return function(){
+								FileManager.getDirectory(
+									fName,
+									callback
+								);
+							};
+						})();
+						//check if we've already copied the file on a previous failed update
+						FileManager.getFile(
+							folderObj,
+							arr[i].name,
+							function(fileObj){
+								if(config.logging){
+									console.log("already copied:"+fileObj.name);
+								}
+								self.updateStack--;
+							},
+							startCopy
+						);
+					}
 				}
 				//if folder
 				else{
+					self.updateStack++;
 					var fetch = (function(){
 						var content = arr[i].content;
 						return function(dirObj){
@@ -283,33 +397,76 @@ var AppManager = (function(){
 		},
 		
 		check: function(){
+			if(config.logging){
+				console.log("fetching version data");
+			}
 			//get server version
-			var xmlhttp = new XMLHttpRequest();
-			xmlhttp.onreadystatechange = function(){
-				if(this.readyState == 4){
-					if(this.status == 200){
-						var obj = null;
-						try{
-							obj = JSON.parse(this.responseText);
+			var folder = FileManager.urlFromDirectoryEntry()+config.dirPrefix;
+			var fileTransfer = new FileTransfer();
+			//prepare a timeout for the file transfer as the plugin doesn't have one
+			var transferDone = false;
+			setTimeout(
+				function(){
+					if(!transferDone){
+						fileTransfer.abort();
+						transferDone = true;
+						if(config.logging){
+							console.log("version fetch timeout");
 						}
-						catch(e){
-							//do nothing for now
-						}
-						if(obj !== null){
-							if(self.logging){
-								console.log(this.responseText);
+					}
+				},
+				5000
+			);
+			//initiate download
+			fileTransfer.download(
+				config.updateURL,
+				folder+"/check"+config.versionFile,
+				function(){
+					transferDone = true;
+					//fetch the new file
+					var folderObj = self.Directories[config.dirPrefix];
+					FileManager.getFile(
+						folderObj,
+						"check"+config.versionFile,
+						function(fileObj){
+							FileManager.stringFromFileEntry(
+								fileObj,
+								function(str){
+									var obj = null;
+									try{
+										obj = JSON.parse(str);
+									}
+									catch(e){
+										if(config.logging){
+											console.log("error parsing version info: "+str);
+										}
+									}
+									if(obj !== null){
+										if(config.logging){
+											console.log("version file parsed");
+										}
+										//compare and update where needed
+										self.performUpdate(obj);
+									}
+								}
+							);
+						},
+						function(){
+							if(config.logging){
+								console.log("failed to get checkversion");
 							}
-							//compare and update where needed
-							self.performUpdate(obj);
 						}
+					);
+				},
+				function(error){
+					transferDone = true;
+					if(config.logging){
+						console.log("error fetching version file");
 					}
-					else{
-						//no or invalid connection so no update
-					}
-				}
-			};
-			xmlhttp.open("GET",self.updateURL,true);
-			xmlhttp.send();
+				},
+				true/*,		//trust all hosts
+				[options]*/
+			);
 		},
 		
 		insertIntoHTML: function(folderObj,arr){
@@ -319,53 +476,53 @@ var AppManager = (function(){
 				root = true;
 				folderObj = self.Directories.current;
 				arr = self.versionObj;
-				if(self.logging){
+				if(config.logging){
 					console.log("begin html insert ("+arr.length+")");
 				}
 			}
 			
-			var urlCallback = null;
+			var cssCallback = function(url){
+				var newLink = document.createElement("link");
+				newLink.rel = "stylesheet";
+				newLink.href = url;
+				document.head.appendChild(newLink);
+				if(config.logging){
+					console.log("css html insert: "+url);
+				}
+			};
+			var jsCallback = function(url){
+				var newScript = document.createElement("script");
+				newScript.src = url;
+				document.head.appendChild(newScript);
+				if(config.logging){
+					console.log("js html insert: "+url);
+				}
+			};
+			
 			for(var i=0; i<arr.length; i++){
 				//if file
 				if(arr[i].content === null){
-					doneCallback = null;
 					var type = arr[i].name.lastIndexOf(".");
 					type = arr[i].name.substring(type+1);
-					//if css
-					if(type == 'css'){
-						urlCallback = function(url){
-							var newLink = document.createElement("link");
-							newLink.rel = "stylesheet";
-							newLink.href = url;
-							document.head.appendChild(newLink);
-						};
-					}
-					//if javascript
-					else if(type == 'js'){
-						urlCallback = function(url){
-							var newScript = document.createElement("script");
-							newScript.src = url;
-							document.head.appendChild(newScript);
-						};
-					}
-					//if other
-					else{
-						//do nothing; file will be accessed through AppManager.getFileURL function
-					}
-					if(urlCallback !== null){
-						if(self.logging){
-							console.log("start html insert: "+arr[i].name);
+					//if css or js
+					if(type == 'css' || type == 'js'){
+						if(config.logging){
+							console.log("start html insert: "+arr[i].name+", type:"+type);
 						}
 						self.insertStack++;
 						FileManager.getFile(
 							folderObj,
 							arr[i].name,
 							function(fileObj){
-								if(self.logging){
-									console.log("html insert: "+fileObj.name+" - "+url);
-								}
+								var type = fileObj.name.lastIndexOf(".");
+								type = fileObj.name.substring(type+1);
 								var url = FileManager.urlFromFileEntry(fileObj);
-								urlCallback(url);
+								if(type == 'css'){
+									cssCallback(url);
+								}
+								else if(type == 'js'){
+									jsCallback(url);
+								}
 								self.insertStack--;
 							}
 						);
@@ -410,13 +567,13 @@ var AppManager = (function(){
 			}
 		},
 		
-		apply: function(){
+		apply: function(){//self.insertIntoHTML();return;
 			//if new version found in newest
 			var success = function(fileObj){
 				var newestObj = FileManager.stringFromFileEntry(
 					fileObj,
 					function(str){
-						if(self.logging){
+						if(config.logging){
 							console.log("applying update");
 						}
 						//delete older directory
@@ -435,7 +592,7 @@ var AppManager = (function(){
 											function(dirObj){
 												self.Directories.older = dirObj;
 											},
-											self.Directories.AppFiles
+											self.Directories[config.dirPrefix]
 										);
 										//rename newest to current
 										FileManager.rename(
@@ -450,7 +607,7 @@ var AppManager = (function(){
 													function(dirObj){
 														self.Directories.newest = dirObj;
 													},
-													self.Directories.AppFiles
+													self.Directories[config.dirPrefix]
 												);
 												//reset current reference
 												FileManager.getDirectory(
@@ -460,7 +617,7 @@ var AppManager = (function(){
 														//load new current
 														self.insertIntoHTML();
 													},
-													self.Directories.AppFiles
+													self.Directories[config.dirPrefix]
 												);
 											}
 										);
@@ -484,7 +641,7 @@ var AppManager = (function(){
 			//check newest folder for new version
 			FileManager.getFile(
 				self.Directories.newest,
-				self.versionFile,
+				config.versionFile,
 				success,
 				error
 			);
@@ -493,16 +650,41 @@ var AppManager = (function(){
 		Ready: function(){
 			//only use the app manager if this code is actually running in an app
 			if(AppManager.isApp){
+				if(typeof(navigator.splashscreen) !== 'undefined'){
+					setTimeout(
+						function(){
+							navigator.splashscreen.hide();
+						},
+						2000
+					);
+				}
+				//check localStorage for config values
+				var data = localStorage.getItem("AppManager");
+				if(data){
+					config = JSON.parse(data);
+				}
+				
+				var callback = function(){
+					FileManager.getDirectory(
+						config.dirPrefix + "/current/",
+						function(folderObj){
+							self.oldBase = document.baseURI;
+							var baseElm = document.createElement("base");
+							baseElm.href = FileManager.urlFromDirectoryEntry(folderObj);
+							document.head.appendChild(baseElm);
+							if(config.logging){
+								console.log("base set to: "+baseElm.href);
+							}
+							self.FetchFolders();
+						}
+					);
+				}
+				
 				FileManager.getDirectory(
-					self.dirPrefix + "/current/",
-					function(folderObj){
-						self.oldBase = document.baseURI;
-						var baseElm = document.createElement("base");
-						baseElm.href = FileManager.urlFromDirectoryEntry(folderObj);
-						document.head.appendChild(baseElm);
-					}
+					config.dirPrefix,
+					callback
 				);
-				self.FetchFolders();
+				
 			}
 			else{
 				self.initApp();
@@ -510,11 +692,6 @@ var AppManager = (function(){
 		},
 		
 		initApp: function(){
-			if(typeof(navigator.splashscreen) !== 'undefined'){
-				setTimeout(function() {
-				    navigator.splashscreen.hide();
-				}, 500);
-			}
 			if(typeof(window.app) !== 'undefined' && typeof(app.initialize) === 'function'){
 				app.initialize();
 			}
@@ -536,6 +713,23 @@ var AppManager = (function(){
 			}
 		},
 		
+		setConfig: function(key,value){
+			config[key] = value;
+		},
+		
+		getConfig: function(){
+			var data = JSON.stringify(config);
+			return JSON.parse(data);
+		},
+		
+		saveConfig: function(){
+			localStorage.setItem("AppManager",JSON.stringify(config));
+		},
+		
+		isUpdateReady: function(){
+			return self.updateReady;
+		},
+		
 		suspendUpdates: function(){
 			
 		},
@@ -546,7 +740,7 @@ var AppManager = (function(){
 		
 		reload: function(){
 			if(typeof(navigator.splashscreen) !== 'undefined'){
-				navigator.splashscreen.show();		//hidden onDeviceReady
+				navigator.splashscreen.show();
 			}
 			//document.location = self.oldBase;
 			// Reload the current page, without using the cache
@@ -554,8 +748,14 @@ var AppManager = (function(){
 				function(){
 					window.location.reload(true);
 				},
-				1000
+				100
 			);
+		},
+		
+		exit: function(){
+			if(typeof(navigator.app)){
+				navigator.app.exitApp();
+			}
 		},
 		
 		getFileURL: function(path,callback){
