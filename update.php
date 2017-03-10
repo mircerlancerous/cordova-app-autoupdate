@@ -62,6 +62,10 @@ if(!isset($_GET['file'])){
 }
 //if we want the file
 else{
+	header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+	header("Cache-Control: post-check=0, pre-check=0", false);
+	header("Pragma: no-cache");
+	
 	$file = $_GET['file'];
 	$outpath .= "/" . $file;
 	$ext = substr($file,strrpos($file,".")+1);
@@ -86,8 +90,9 @@ else{
 		case 'css':
 			header("Content-type: text/css");
 			break;
+		default:break;
 	}
 	
-	readfile($outpath);
+	@readfile($outpath);
 }
 ?>
