@@ -694,6 +694,9 @@ var AppManager = (function(){
 		initApp: function(){
 			if(typeof(window.app) !== 'undefined' && typeof(app.initialize) === 'function'){
 				app.initialize();
+				if(config.logging){
+					console.log("app initialized");
+				}
 			}
 		}
 	};
