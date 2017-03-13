@@ -761,6 +761,16 @@ var AppManager = (function(){
 			}
 		},
 		
+		reset: function(){
+			FileManager.deleteDirectory(
+				config.dirPrefix,
+				function(){
+					alert("files reset - app will now restart");
+					AppManager.reload();
+				}
+			);
+		},
+		
 		getFileURL: function(path,callback){
 			var pos = path.lastIndexOf("/");
 			var file = path.substring(pos+1);
