@@ -12,8 +12,11 @@ limitations under the License.
 */
 
 /*
-Plugin list:
+Plugin list (AppManager and FileManager):
+cordova-plugin-file
 https://github.com/apache/cordova-plugin-file-transfer
+https://github.com/moderna/cordova-plugin-cache
+cordova-plugin-splashscreen
 https://github.com/MobileChromeApps/cordova-plugin-zip		-not yet implemented
 */
 
@@ -21,6 +24,7 @@ var AppManager = (function(){
 	//private area
 	var config = {
 		autoUpdate: true,
+		basiclogging: true,
 		logging: false,
 		updateURL: "", //enter your app's update server url here
 		versionFile: "version.json",
@@ -148,7 +152,7 @@ var AppManager = (function(){
 			
 			if(serverStr === JSON.stringify(self.versionObj)){
 				//no changes
-				if(config.logging){
+				if(config.basiclogging){
 					console.log("no changes");
 				}
 				return;
@@ -277,7 +281,7 @@ var AppManager = (function(){
 								url,
 								FileManager.urlFromDirectoryEntry(folderObj) + name,
 								function(){
-									if(config.logging){
+									if(config.basiclogging){
 										console.log("downloaded: "+folderObj.name+"/"+name);
 									}
 									self.updateStack--;
@@ -398,7 +402,7 @@ var AppManager = (function(){
 		
 		check: function(){
 			if(config.logging){
-				console.log("fetching version data");
+				console.log("fetching version data: "+config.updateURL);
 			}
 			//get server version
 			var folder = FileManager.urlFromDirectoryEntry()+config.dirPrefix;
@@ -452,7 +456,7 @@ var AppManager = (function(){
 							);
 						},
 						function(){
-							if(config.logging){
+							if(config.basiclogging){
 								console.log("failed to get checkversion");
 							}
 						}
@@ -461,7 +465,7 @@ var AppManager = (function(){
 				function(error){
 					transferDone = true;
 					if(config.logging){
-						console.log("error fetching version file");
+						console.log("error fetching version file:"+JSON.stringify(error));
 					}
 				},
 				true/*,		//trust all hosts
@@ -567,7 +571,7 @@ var AppManager = (function(){
 			}
 		},
 		
-		apply: function(){//self.insertIntoHTML();return;
+		apply: function(){
 			//if new version found in newest
 			var success = function(fileObj){
 				var newestObj = FileManager.stringFromFileEntry(
@@ -694,7 +698,7 @@ var AppManager = (function(){
 		initApp: function(){
 			if(typeof(window.app) !== 'undefined' && typeof(app.initialize) === 'function'){
 				app.initialize();
-				if(config.logging){
+				if(config.basiclogging){
 					console.log("app initialized");
 				}
 			}
@@ -745,14 +749,19 @@ var AppManager = (function(){
 			if(typeof(navigator.splashscreen) !== 'undefined'){
 				navigator.splashscreen.show();
 			}
-			//document.location = self.oldBase;
-			// Reload the current page, without using the cache
-			setTimeout(
-				function(){
-					window.location.reload(true);
-				},
-				100
-			);
+			var doReload = function(){
+				window.location.reload(true);
+			};
+			if(typeof(cache) !== 'undefined'){
+				//clear the webview/cordova cache
+				cache.clear(doReload,doReload);
+			}
+			else{
+				setTimeout(
+					doReload,
+					100
+				);
+			}
 		},
 		
 		exit: function(){
