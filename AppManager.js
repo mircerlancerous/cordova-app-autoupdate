@@ -26,12 +26,14 @@ var AppManager = (function(){
 		autoUpdate: true,
 		basiclogging: true,
 		logging: false,
+		skipRebase: false,
 		updateURL: "", //enter your app's update server url here
 		versionFile: "version.json",
 		dirPrefix: "AppFiles"
 	};
 	
 	var self = {
+		enabled: true,
 		oldBase: "",
 		versionObj: null,
 		Directories: {},
@@ -276,6 +278,7 @@ var AppManager = (function(){
 						/*	if(config.logging){
 								console.log("file url: "+url);
 							}*/
+							//begin transfer
 							var fileTransfer = new FileTransfer();
 							fileTransfer.download(
 								url,
@@ -652,16 +655,16 @@ var AppManager = (function(){
 		},
 		
 		Ready: function(){
+			if(typeof(navigator.splashscreen) !== 'undefined'){
+				setTimeout(
+					function(){
+						navigator.splashscreen.hide();
+					},
+					2000
+				);
+			}
 			//only use the app manager if this code is actually running in an app
-			if(AppManager.isApp){
-				if(typeof(navigator.splashscreen) !== 'undefined'){
-					setTimeout(
-						function(){
-							navigator.splashscreen.hide();
-						},
-						2000
-					);
-				}
+			if(self.enabled){
 				//check localStorage for config values
 				var data = localStorage.getItem("AppManager");
 				if(data){
@@ -672,17 +675,19 @@ var AppManager = (function(){
 					FileManager.getDirectory(
 						config.dirPrefix + "/current/",
 						function(folderObj){
-							self.oldBase = document.baseURI;
-							var baseElm = document.createElement("base");
-							baseElm.href = FileManager.urlFromDirectoryEntry(folderObj);
-							document.head.appendChild(baseElm);
-							if(config.logging){
-								console.log("base set to: "+baseElm.href);
+							if(!config.skipRebase){
+								self.oldBase = document.baseURI;
+								var baseElm = document.createElement("base");
+								baseElm.href = FileManager.urlFromDirectoryEntry(folderObj);
+								document.head.appendChild(baseElm);
+								if(config.logging){
+									console.log("base set to: "+baseElm.href);
+								}
 							}
 							self.FetchFolders();
 						}
 					);
-				}
+				};
 				
 				FileManager.getDirectory(
 					config.dirPrefix,
@@ -699,7 +704,11 @@ var AppManager = (function(){
 			if(typeof(window.app) !== 'undefined' && typeof(app.initialize) === 'function'){
 				app.initialize();
 				if(config.basiclogging){
-					console.log("app initialized");
+					var str = "app initialized";
+					if(!self.enabled){
+						str += " - AM disabled";
+					}
+					console.log(str);
 				}
 			}
 		}
@@ -707,7 +716,6 @@ var AppManager = (function(){
 	
 	//public area
 	return {
-		isApp: true,
 		// Application Constructor
 		initialize: function() {
 			var check = document.URL.indexOf( 'http://' ) === -1 && document.URL.indexOf( 'https://' ) === -1;
@@ -715,7 +723,7 @@ var AppManager = (function(){
 				document.addEventListener('deviceready', self.Ready, false);
 			}
 			else{
-				AppManager.isApp = false;
+				self.enabled = false;
 				window.addEventListener('load', self.Ready, false);
 			}
 		},
@@ -781,6 +789,10 @@ var AppManager = (function(){
 		},
 		
 		getFileURL: function(path,callback){
+			if(path === null || path === "/"){
+				FileManager.urlFromDirectoryEntry(self.Directories.current,callback);
+				return;
+			}
 			var pos = path.lastIndexOf("/");
 			var file = path.substring(pos+1);
 			path = path.substring(0,pos);
