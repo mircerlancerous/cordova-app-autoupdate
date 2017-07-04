@@ -256,6 +256,9 @@ var FileManager = (function(){
 					folderObj = self.rootDir;
 				}
 				else{
+					if(typeof(callback) === 'function'){
+						callback(false);
+					}
 					return false;
 				}
 			}
