@@ -14,16 +14,16 @@ limitations under the License.
 /*
 Plugin list (AppManager and FileManager):
 cordova-plugin-file
-https://github.com/apache/cordova-plugin-file-transfer
 https://github.com/moderna/cordova-plugin-cache
-cordova-plugin-splashscreen
-https://github.com/MobileChromeApps/cordova-plugin-zip		-not yet implemented
 */
 
 var AppManager = (function(){
 	//private area
 	var config = {
+		enabled: true,
+		appVersion: 1.00,
 		autoUpdate: true,
+		updatesSuspended: false,
 		basiclogging: true,
 		logging: false,
 		skipRebase: false,
@@ -33,7 +33,6 @@ var AppManager = (function(){
 	};
 	
 	var self = {
-		enabled: true,
 		oldBase: "",
 		versionObj: null,
 		Directories: {},
@@ -42,6 +41,7 @@ var AppManager = (function(){
 		updateStack: 0,		//for checking whether we're still downloading the update or not
 		updateReady: false,
 		downloadError: false,
+		appInitialized: false,
 		
 		//do NOT change these values as they are hard-coded throughout
 		Folders: [
@@ -102,23 +102,14 @@ var AppManager = (function(){
 				);
 			};
 			//if no current version, or error
-			var error = function(e){
-				if(e.code !== FileError.NOT_FOUND_ERR){
-					//other issue so send to file manager error handler
-					FileManager.ErrorFs(e);
-					return;
-				}
+			var error = function(e,name){
 				if(config.logging){
-					console.log("version file not found");
+					console.log("version file not found: "+name);
 				}
 				//check for new version - this is likely the first load of the app
-				self.updatingSuspended(
-					function(suspended){
-						if(!suspended){
-							self.check();
-						}
-					}
-				);
+				if(!config.updatesSuspended){
+					self.check();
+				}
 			};
 			//fetch current file
 			FileManager.getFile(
@@ -130,9 +121,11 @@ var AppManager = (function(){
 		},
 		
 		performUpdate: function(serverObj){
+			var firstDownload = false;
 			var serverStr = JSON.stringify(serverObj);
 			//if there is no current version
 			if(self.versionObj === null){
+				firstDownload = true;
 				if(config.logging){
 					console.log("first download");
 				}
@@ -187,8 +180,8 @@ var AppManager = (function(){
 					if(config.logging){
 						console.log("update ready");
 					}
-					//if we want to auto-apply
-					if(config.autoUpdate){
+					//if we want to auto-apply, or this is the first download of app files
+					if(config.autoUpdate || firstDownload){
 						AppManager.reload();
 					}
 					//if we want to control when the app is updated
@@ -279,10 +272,11 @@ var AppManager = (function(){
 								console.log("file url: "+url);
 							}*/
 							//begin transfer
-							var fileTransfer = new FileTransfer();
+							var fileTransfer = new newFileTransfer();
 							fileTransfer.download(
 								url,
-								FileManager.urlFromDirectoryEntry(folderObj) + name,
+								FileManager.urlFromDirectoryEntry(folderObj),
+								name,
 								function(){
 									if(config.basiclogging){
 										console.log("downloaded: "+folderObj.name+"/"+name);
@@ -292,11 +286,8 @@ var AppManager = (function(){
 								function(error) {
 									self.updateStack--;
 									self.downloadError = true;
-									//console.log(JSON.stringify(error));
-									console.log("download error: " + error.source + " " + error.target+ " " + error.code);
-								},
-								true/*,		//trust all hosts
-								[options]*/
+									console.log("download error: " + error);
+								}
 							);
 						};
 					})();
@@ -399,37 +390,19 @@ var AppManager = (function(){
 			}
 		},
 		
-		updatingSuspended: function(callback){
-			callback(false);		//todo
-		},
-		
 		check: function(){
-			if(config.logging){
+			if(config.basiclogging){
 				console.log("fetching version data: "+config.updateURL);
 			}
 			//get server version
 			var folder = FileManager.urlFromDirectoryEntry()+config.dirPrefix;
-			var fileTransfer = new FileTransfer();
-			//prepare a timeout for the file transfer as the plugin doesn't have one
-			var transferDone = false;
-			setTimeout(
-				function(){
-					if(!transferDone){
-						fileTransfer.abort();
-						transferDone = true;
-						if(config.logging){
-							console.log("version fetch timeout");
-						}
-					}
-				},
-				5000
-			);
+			var fileTransfer = new newFileTransfer();
 			//initiate download
 			fileTransfer.download(
 				config.updateURL,
-				folder+"/check"+config.versionFile,
+				folder,
+				"check"+config.versionFile,
 				function(){
-					transferDone = true;
 					//fetch the new file
 					var folderObj = self.Directories[config.dirPrefix];
 					FileManager.getFile(
@@ -458,7 +431,7 @@ var AppManager = (function(){
 								}
 							);
 						},
-						function(){
+						function(e,name){
 							if(config.basiclogging){
 								console.log("failed to get checkversion");
 							}
@@ -466,13 +439,10 @@ var AppManager = (function(){
 					);
 				},
 				function(error){
-					transferDone = true;
-					if(config.logging){
-						console.log("error fetching version file:"+JSON.stringify(error));
+					if(config.basiclogging){
+						console.log("error fetching version file - status:"+error);
 					}
-				},
-				true/*,		//trust all hosts
-				[options]*/
+				}
 			);
 		},
 		
@@ -488,9 +458,14 @@ var AppManager = (function(){
 				}
 			}
 			
+			var elmOnLoad = function(){
+				self.insertStack--;
+			};
+			
 			var cssCallback = function(url){
 				var newLink = document.createElement("link");
 				newLink.rel = "stylesheet";
+				newLink.onload = elmOnLoad;
 				newLink.href = url;
 				document.head.appendChild(newLink);
 				if(config.logging){
@@ -499,6 +474,7 @@ var AppManager = (function(){
 			};
 			var jsCallback = function(url){
 				var newScript = document.createElement("script");
+				newScript.onload = elmOnLoad;
 				newScript.src = url;
 				document.head.appendChild(newScript);
 				if(config.logging){
@@ -530,7 +506,9 @@ var AppManager = (function(){
 								else if(type == 'js'){
 									jsCallback(url);
 								}
-								self.insertStack--;
+							},
+							function(e,name){
+								console.log("failed to get file during insert: "+name);
 							}
 						);
 					}
@@ -564,13 +542,9 @@ var AppManager = (function(){
 				};
 				setTimeout(init,100);
 				//check server for new version
-				self.updatingSuspended(
-					function(suspended){
-						if(!suspended){
-							self.check();
-						}
-					}
-				);
+				if(!config.updatesSuspended){
+					self.check();
+				}
 			}
 		},
 		
@@ -636,12 +610,13 @@ var AppManager = (function(){
 				);
 			};
 			//if no newest version, or error
-			var error = function(e){
+			var error = function(e,name){
 				if(e.code !== FileError.NOT_FOUND_ERR){
 					//other issue so send to file manager error handler
 					FileManager.ErrorFs(e);
 					return;
 				}
+				console.log("file not found in apply: "+name);
 				//no newest version so load current
 				self.insertIntoHTML();
 			};
@@ -655,28 +630,22 @@ var AppManager = (function(){
 		},
 		
 		Ready: function(){
-			if(typeof(navigator.splashscreen) !== 'undefined'){
-				setTimeout(
-					function(){
-						navigator.splashscreen.hide();
-					},
-					2000
-				);
+			//check localStorage for config values
+			var data = localStorage.getItem("AppManager");
+			if(data){
+				config = JSON.parse(data);
 			}
 			//only use the app manager if this code is actually running in an app
-			if(self.enabled){
-				//check localStorage for config values
-				var data = localStorage.getItem("AppManager");
-				if(data){
-					config = JSON.parse(data);
-				}
-				
+			if(config.enabled){
 				var callback = function(){
 					FileManager.getDirectory(
 						config.dirPrefix + "/current/",
 						function(folderObj){
 							if(!config.skipRebase){
 								self.oldBase = document.baseURI;
+								if(typeof(self.oldBase) === 'undefined'){
+									self.oldBase = window.location.href;
+								}
 								var baseElm = document.createElement("base");
 								baseElm.href = FileManager.urlFromDirectoryEntry(folderObj);
 								document.head.appendChild(baseElm);
@@ -693,7 +662,6 @@ var AppManager = (function(){
 					config.dirPrefix,
 					callback
 				);
-				
 			}
 			else{
 				self.initApp();
@@ -705,25 +673,35 @@ var AppManager = (function(){
 				app.initialize();
 				if(config.basiclogging){
 					var str = "app initialized";
-					if(!self.enabled){
+					if(!config.enabled){
 						str += " - AM disabled";
 					}
 					console.log(str);
 				}
 			}
+			self.appInitialized = true;
 		}
 	};
 	
 	//public area
 	return {
+		isApp: true,
+		
 		// Application Constructor
-		initialize: function() {
+		initialize: function(apponly){
+			if(typeof(apponly) !== 'undefined' && apponly){
+				self.initApp();
+				return;
+			}
 			var check = document.URL.indexOf( 'http://' ) === -1 && document.URL.indexOf( 'https://' ) === -1;
 			if(check){
 				document.addEventListener('deviceready', self.Ready, false);
 			}
 			else{
-				self.enabled = false;
+				if(typeof(window.cordova) === 'undefined'){
+					AppManager.isApp = false;
+				}
+				config.enabled = false;
 				window.addEventListener('load', self.Ready, false);
 			}
 		},
@@ -732,7 +710,10 @@ var AppManager = (function(){
 			config[key] = value;
 		},
 		
-		getConfig: function(){
+		getConfig: function(key){
+			if(typeof(key) !== 'undefined'){
+				return config[key];
+			}
 			var data = JSON.stringify(config);
 			return JSON.parse(data);
 		},
@@ -746,21 +727,31 @@ var AppManager = (function(){
 		},
 		
 		suspendUpdates: function(){
-			
+			config.updatesSuspended = true;
 		},
 		
 		restoreUpdates: function(){
-			
+			config.updatesSuspended = false;
 		},
 		
 		reload: function(){
-			if(typeof(navigator.splashscreen) !== 'undefined'){
-				navigator.splashscreen.show();
-			}
 			var doReload = function(){
-				window.location.reload(true);
+				var onDone = function(){
+					window.location.reload(true);
+				};
+				if(typeof(window.app) !== 'undefined' && typeof(app.onPause) === 'function'){
+					app.onPause();
+					//give time for onPause to finish
+					setTimeout(
+						onDone,
+						100
+					);
+				}
+				else{
+					onDone();
+				}
 			};
-			if(typeof(cache) !== 'undefined'){
+			if(typeof(cache) !== 'undefined' && typeof(cache.clear) === 'function'){
 				//clear the webview/cordova cache
 				cache.clear(doReload,doReload);
 			}
@@ -773,19 +764,35 @@ var AppManager = (function(){
 		},
 		
 		exit: function(){
-			if(typeof(navigator.app)){
-				navigator.app.exitApp();
+			var onDone = function(){
+				if(typeof(navigator.app) !== 'undefined'){
+					navigator.app.exitApp();
+				}
+			};
+			if(typeof(window.app) !== 'undefined' && typeof(app.onPause) === 'function'){
+				app.onPause(onDone);
+			}
+			else{
+				onDone();
 			}
 		},
 		
-		reset: function(){
+		reset: function(fullReset){
+			if(typeof(fullReset) !== 'undefined' && fullReset){
+				localStorage.clear();
+			}
 			FileManager.deleteDirectory(
 				config.dirPrefix,
 				function(){
 					alert("files reset - app will now restart");
+					self.restoreUpdates();		//required for reset in the case they were disabled
 					AppManager.reload();
 				}
 			);
+		},
+		
+		getVersion: function(){
+			return config.appVersion;
 		},
 		
 		getFileURL: function(path,callback){
@@ -805,6 +812,9 @@ var AppManager = (function(){
 						function(fileObj){
 							var url = FileManager.urlFromFileEntry(fileObj);
 							callback(url);
+						},
+						function(e,name){
+							console.log("file not found in getFileURL: "+name);
 						}
 					);
 				},
