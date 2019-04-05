@@ -43,7 +43,7 @@ var FileManager = (function(){
 					msg = 'INVALID_STATE_ERR';
 					break;
 				default:
-					msg = 'Unknown Error';
+					msg = 'Unknown Error:'+e.toString();
 					break;
 			};
 			
@@ -55,7 +55,10 @@ var FileManager = (function(){
 				destObj,
 				moveObj.name,
 				callback,
-				FileManager.ErrorFs
+				function(e){
+					console.log("error moving:"+FileManager.urlFromFileEntry(moveObj)+" to "+FileManager.urlFromDirectoryEntry(destObj));
+					FileManager.ErrorFs(e);
+				}
 			);
 		},
 		
@@ -78,10 +81,16 @@ var FileManager = (function(){
 						dirObj,
 						newName,
 						callback,
-						FileManager.ErrorFs
+						function(e){
+							console.log("error renaming:"+FileManager.urlFromFileEntry(oldObj)+" to "+FileManager.urlFromDirectoryEntry(dirObj)+" : "+newName);
+							FileManager.ErrorFs(e);
+						}
 					);
 				},
-				FileManager.ErrorFs
+				function(e){
+					console.log("error fetching parent of:"+FileManager.urlFromFileEntry(oldObj));
+					FileManager.ErrorFs(e);
+				}
 			);
 		},
 		
@@ -125,7 +134,10 @@ var FileManager = (function(){
 					window.resolveLocalFileSystemURL(
 						dir,
 						callback,
-						FileManager.ErrorFs
+						function(e){
+							console.log("error resolving: "+dir);
+							FileManager.ErrorFs(e);
+						}
 					);
 				}
 			};
@@ -140,7 +152,10 @@ var FileManager = (function(){
 						dirObj = dirEntry;
 						finished();
 					},
-					FileManager.ErrorFs
+					function(e){
+						console.log("error resolving cordova data directory: "+cordova.file.dataDirectory);
+						FileManager.ErrorFs(e);
+					}
 				);
 			}
 			else{
@@ -160,7 +175,10 @@ var FileManager = (function(){
 							callback();
 						}
 					},
-					self.ErrorFs
+					function(e){
+						console.log("error removing recursively:"+FileManager.urlFromFileEntry(dirEntry));
+						FileManager.ErrorFs(e);
+					}
 				);
 			};
 			if(typeof(dir) !== 'string'){
@@ -174,9 +192,6 @@ var FileManager = (function(){
 		},
 		
 		getFile: function(folderObj, fileName, callback, error){
-			if(typeof(error) !== 'function'){
-				error = FileManager.ErrorFs;
-			}
 			var fetch = function(dirObj){
 				if(self.logging){
 					console.log("fetch file: "+folderObj.name+"/"+fileName);
@@ -185,7 +200,15 @@ var FileManager = (function(){
 					fileName,
 					{create: false, exclusive: false},
 					callback,		//a fileEntry object will be passed as the first and only parameter
-					error
+					function(e){
+						if(typeof(error) === 'function'){
+							error(e,FileManager.urlFromFileEntry(folderObj)+fileName);
+						}
+						else{
+							console.log("get file fail: "+FileManager.urlFromFileEntry(folderObj)+fileName);
+							FileManager.ErrorFs(e);
+						}
+					}
 				);
 			};
 			if(folderObj === null){
@@ -200,7 +223,7 @@ var FileManager = (function(){
 			fetch(folderObj);
 		},
 		
-		saveFile: function(folderObj, fileName, fileData, dataTypeObj){
+		saveFile: function(folderObj, fileName, fileData, dataTypeObj, callback){
 			folderObj.getFile(
 				fileName,
 				{create: true, exclusive: false},
@@ -212,22 +235,33 @@ var FileManager = (function(){
 								if(self.logging){
 									console.log("Successful file write: " + fileEntry.toURL());
 								}
-							};
-							fileWriter.onerror = function(e){
-								if(self.logging){
-									console.log("Failed file write: " + e.toString());
+								if(typeof(callback) === 'function'){
+									callback();
 								}
 							};
+							fileWriter.onerror = function(e){
+								console.log("error saving file 2: "+FileManager.urlFromFileEntry(folderObj)+" /"+fileName);
+								FileManager.ErrorFs(e);
+							};
 							//write the data in the appropriate format
-							if(typeof(dataTypeObj) === 'undefined'){
+							if(typeof(dataTypeObj) === 'undefined' || !dataTypeObj){
 								dataTypeObj = {type: "text/plain"};
 							}
-							var blob = new Blob([fileData],dataTypeObj);
+							var blob = null;
+							if(dataTypeObj == "blob"){
+								blob = fileData;
+							}
+							else{
+								blob = new Blob([fileData],dataTypeObj);
+							}
 							fileWriter.write(blob);
 						}
 					);
 				},
-				FileManager.ErrorFs
+				function(e){
+					console.log("error saving file 1: "+FileManager.urlFromFileEntry(folderObj)+" /"+fileName);
+					FileManager.ErrorFs(e);
+				}
 			);
 		},
 		
@@ -245,7 +279,10 @@ var FileManager = (function(){
 			
 			        reader.readAsText(file);
 			    },
-			    FileManager.ErrorFs
+			    function(e){
+					console.log("error converting file to string: "+FileManager.urlFromFileEntry(fileObj));
+					FileManager.ErrorFs(e);
+				}
 		    );
 		},
 		
@@ -274,3 +311,68 @@ var FileManager = (function(){
 		}
 	};
 })();
+
+function newFileTransfer(){
+	var self = this;
+	var request = null;
+	var aborted = false;
+	
+	var destpath = "";
+	var filename = "";
+	
+	var success = null;
+	var fail = null;
+	
+	var onResponse = function(e){
+		var blob = request.response; // Note: not request.responseText
+		if(request.status == 200 && blob) {
+			var contentType = request.getResponseHeader("content-type");
+			saveFile(blob,contentType);
+		}
+		else{
+			fail(request.status);
+		}
+	};
+	
+	var saveFile = function(blob,contentType){
+		FileManager.getDirectory(
+			destpath,
+			function(dirObj){
+				FileManager.saveFile(
+					dirObj,
+					filename,
+					blob,
+					"blob",
+					success
+				);
+			}
+		);
+	};
+	
+	this.download = function(sourceURL,destinationPath,fileName,onSuccess,onFail){
+		success = onSuccess;
+		fail = onFail;
+		filename = fileName;
+		destpath = destinationPath;
+		
+		request = new XMLHttpRequest();
+		request.open("GET",sourceURL,true);
+		request.responseType = "blob";
+		request.timeout = 30000;		//timeout after 30 seconds of trying to get file
+		request.onreadystatechange = function(e){
+			if(this.readyState == 4){
+				onResponse(e)
+			}
+		};
+		request.send(null);
+	};
+	
+	this.abort = function(){
+		if(!request){
+			return false;
+		}
+		aborted = true;
+		request.abort();
+		return true;
+	};
+};
