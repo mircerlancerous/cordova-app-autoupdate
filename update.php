@@ -12,6 +12,31 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+function enable_cors() {
+
+    // Allow from any origin
+    if (isset($_SERVER['HTTP_ORIGIN'])) {
+        // Decide if the origin in $_SERVER['HTTP_ORIGIN'] is one
+        // you want to allow, and if so:
+        header("Access-Control-Allow-Origin: {$_SERVER['HTTP_ORIGIN']}");
+        //header('Access-Control-Allow-Credentials: true');
+        header('Access-Control-Max-Age: 86400');    // cache for 1 day
+    }
+
+    // Access-Control headers are received during OPTIONS requests
+    if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
+
+        if (isset($_SERVER['HTTP_ACCESS_CONTROL_REQUEST_METHOD']))
+            // may also be using PUT, PATCH, HEAD etc
+            header("Access-Control-Allow-Methods: GET, POST, OPTIONS");         
+
+        if (isset($_SERVER['HTTP_ACCESS_CONTROL_REQUEST_HEADERS']))
+            header("Access-Control-Allow-Headers: {$_SERVER['HTTP_ACCESS_CONTROL_REQUEST_HEADERS']}");
+
+        exit(0);
+    }
+}
+
 function JSONversion($outpath,$sub="/"){
 	if(!file_exists($outpath)){
 		return FALSE;
@@ -43,12 +68,13 @@ class FileVersion{
 
 ###############################################################################
 
-define("DOCROOT","/home/myaccount/AppFiles/");
+enable_cors();
+	
 //check if there is a request for a JSON version report
 if(!isset($_GET['version']) && !isset($_GET['file'])){
 	echo "false";exit;
 }
-$outpath = DOCROOT.$_GET['version'];
+$outpath = "/home/myaccount/AppFiles/".$_GET['version'];
 if(!file_exists($outpath)){
    echo "false";exit;
 }
@@ -90,7 +116,8 @@ else{
 		case 'css':
 			header("Content-type: text/css");
 			break;
-		default:break;
+		default:
+			exit;	//don't allow download of file types that aren't explicitely allowed
 	}
 	
 	@readfile($outpath);
